@@ -238,6 +238,7 @@ static struct
             unsigned err_3outof: 1;
             unsigned crc_ok: 1;
             unsigned c1_packet: 1;
+            unsigned c1b: 1;
         };
     };
     unsigned l;
@@ -306,6 +307,7 @@ static void rx_low_nibble_last_lfield_bit(unsigned bit)
     {
         if (t1_c1_packet_decoder_work.mode == C1_MODE_A || t1_c1_packet_decoder_work.mode == C1_MODE_B)
         {
+            t1_c1_packet_decoder_work.c1b = t1_c1_packet_decoder_work.mode == C1_MODE_B;
             t1_c1_packet_decoder_work.state = &states[26]; // c1_rx_first_mode_bit
         }
         else
@@ -411,7 +413,11 @@ static void c1_rx_last_lfield_bit(unsigned bit)
     t1_c1_packet_decoder_work.L = t1_c1_packet_decoder_work.byte;
     t1_c1_packet_decoder_work.l = 0;
     t1_c1_packet_decoder_work.packet[t1_c1_packet_decoder_work.l++] = t1_c1_packet_decoder_work.L;
-    t1_c1_packet_decoder_work.L = FULL_TLG_LENGTH_FROM_L_FIELD[t1_c1_packet_decoder_work.L];
+    if (!t1_c1_packet_decoder_work.c1b) {
+        unsigned L = t1_c1_packet_decoder_work.L;
+        t1_c1_packet_decoder_work.L += ((L - 10 + 15)/16 + 1) * 2; // C1A does not count CRCs, so we need to compute the number of blocks here
+    }
+    t1_c1_packet_decoder_work.L++; // account for length byte itself
 }
 
 static void c1_rx_first_data_bit(unsigned bit)
@@ -486,6 +492,34 @@ static bool check_calc_crc_wmbus(const uint8_t *data, size_t datalen)
     return crc_ok;
 }
 
+static bool check_calc_crc_wmbus_c1b(const uint8_t *data, size_t datalen)
+{
+    bool crc_ok = true;
+    uint16_t crc1, crc2;
+
+    while (crc_ok && datalen)
+    {
+        if (datalen >= 128)
+        {
+            crc1 = calc_crc_wmbus(data, 126);
+            crc2 = (data[126] << 8) | (data[127]);
+            data += 128;
+            datalen -= 128;
+            crc_ok = (crc1 == crc2);
+        }
+        else
+        {
+            crc1 = calc_crc_wmbus(data, datalen-2);
+            crc2 = (data[datalen-2] << 8) | (data[datalen-1]);
+            data += datalen;
+            datalen -= datalen;
+            crc_ok = (crc1 == crc2);
+        }
+    }
+
+    return crc_ok;
+}
+
 /** @brief Strip CRCs in place. */
 static unsigned cook_pkt(uint8_t *data, unsigned datalen)
 {
@@ -528,6 +562,38 @@ static unsigned cook_pkt(uint8_t *data, unsigned datalen)
     return dstlen;
 }
 
+static unsigned cook_pkt_c1b(uint8_t *data, unsigned datalen)
+{
+    uint8_t *dst = data;
+    unsigned dstlen = 0;
+
+    while (datalen)
+    {
+        if (datalen >= 128)
+        {
+            memmove(dst, data, 126);
+
+            dst += 126;
+            dstlen += 126;
+
+            data += 128;
+            datalen -= 128;
+        }
+        else
+        {
+            memmove(dst, data, datalen-2);
+
+            dst += (datalen-2);
+            dstlen += (datalen-2);
+
+            data += datalen;
+            datalen -= datalen;
+        }
+    }
+
+    return dstlen;
+}
+
 static inline uint32_t get_serial(const uint8_t *const packet)
 {
     uint32_t serial;
@@ -549,7 +615,10 @@ static void t1_c1_packet_decoder(unsigned bit, unsigned rssi)
     }
     else if (*t1_c1_packet_decoder_work.state == done)
     {
-        t1_c1_packet_decoder_work.crc_ok = check_calc_crc_wmbus(t1_c1_packet_decoder_work.packet, t1_c1_packet_decoder_work.L) ? 1 : 0;
+        if (t1_c1_packet_decoder_work.c1b)
+            t1_c1_packet_decoder_work.crc_ok = check_calc_crc_wmbus_c1b(t1_c1_packet_decoder_work.packet, t1_c1_packet_decoder_work.L) ? 1 : 0;
+        else
+            t1_c1_packet_decoder_work.crc_ok = check_calc_crc_wmbus(t1_c1_packet_decoder_work.packet, t1_c1_packet_decoder_work.L) ? 1 : 0;
 
         fprintf(stdout, "%s;%u;%u;%s;%u;%u;%08X;", t1_c1_packet_decoder_work.c1_packet ? "C1": "T1",
                 t1_c1_packet_decoder_work.crc_ok,
@@ -559,18 +628,15 @@ static void t1_c1_packet_decoder(unsigned bit, unsigned rssi)
                 rssi,
                 get_serial(t1_c1_packet_decoder_work.packet));
 
-#if 0
-        fprintf(stdout, "0x");
-        for (size_t l = 0; l < t1_c1_packet_decoder_work.L; l++) fprintf(stdout, "%02x", t1_c1_packet_decoder_work.packet[l]);
-        fprintf(stdout, ";");
-#endif
-
 #if 1
-        t1_c1_packet_decoder_work.L = cook_pkt(t1_c1_packet_decoder_work.packet, t1_c1_packet_decoder_work.L);
-        fprintf(stdout, "0x");
-        for (size_t l = 0; l < t1_c1_packet_decoder_work.L; l++) fprintf(stdout, "%02x", t1_c1_packet_decoder_work.packet[l]);
+        if (t1_c1_packet_decoder_work.c1b)
+            t1_c1_packet_decoder_work.L = cook_pkt_c1b(t1_c1_packet_decoder_work.packet, t1_c1_packet_decoder_work.L);
+        else
+            t1_c1_packet_decoder_work.L = cook_pkt(t1_c1_packet_decoder_work.packet, t1_c1_packet_decoder_work.L);
 #endif
 
+        fprintf(stdout, "0x");
+        for (size_t l = 0; l < t1_c1_packet_decoder_work.L; l++) fprintf(stdout, "%02x", t1_c1_packet_decoder_work.packet[l]);
         fprintf(stdout, "\n");
         fflush(stdout);
 
