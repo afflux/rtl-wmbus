@@ -66,37 +66,6 @@ static const uint8_t LOW_NIBBLE_3OUTOF6[] =
 };
 
 
-static const uint16_t FULL_TLG_LENGTH_FROM_L_FIELD[] =
-{
-    3,   4,   5,   6,   7,   8,   9,  10,  11,  12,
-    15,  16,  17,  18,  19,  20,  21,  22,  23,  24,
-    25,  26,  27,  28,  29,  30,  33,  34,  35,  36,
-    37,  38,  39,  40,  41,  42,  43,  44,  45,  46,
-    47,  48,  51,  52,  53,  54,  55,  56,  57,  58,
-    59,  60,  61,  62,  63,  64,  65,  66,  69,  70,
-    71,  72,  73,  74,  75,  76,  77,  78,  79,  80,
-    81,  82,  83,  84,  87,  88,  89,  90,  91,  92,
-    93,  94,  95,  96,  97,  98,  99, 100, 101, 102,
-    105, 106, 107, 108, 109, 110, 111, 112, 113, 114,
-    115, 116, 117, 118, 119, 120, 123, 124, 125, 126,
-    127, 128, 129, 130, 131, 132, 133, 134, 135, 136,
-    137, 138, 141, 142, 143, 144, 145, 146, 147, 148,
-    149, 150, 151, 152, 153, 154, 155, 156, 159, 160,
-    161, 162, 163, 164, 165, 166, 167, 168, 169, 170,
-    171, 172, 173, 174, 177, 178, 179, 180, 181, 182,
-    183, 184, 185, 186, 187, 188, 189, 190, 191, 192,
-    195, 196, 197, 198, 199, 200, 201, 202, 203, 204,
-    205, 206, 207, 208, 209, 210, 213, 214, 215, 216,
-    217, 218, 219, 220, 221, 222, 223, 224, 225, 226,
-    227, 228, 231, 232, 233, 234, 235, 236, 237, 238,
-    239, 240, 241, 242, 243, 244, 245, 246, 249, 250,
-    251, 252, 253, 254, 255, 256, 257, 258, 259, 260,
-    261, 262, 263, 264, 267, 268, 269, 270, 271, 272,
-    273, 274, 275, 276, 277, 278, 279, 280, 281, 282,
-    285, 286, 287, 288, 289, 290
-};
-
-
 static const uint16_t CRC16_DNP_TABLE[] =
 {
     0x0000, 0x3d65, 0x7aca, 0x47af, 0xf594, 0xc8f1, 0x8f5e, 0xb23b,
@@ -320,7 +289,9 @@ static void rx_low_nibble_last_lfield_bit(unsigned bit)
         t1_c1_packet_decoder_work.L |= byte;
         t1_c1_packet_decoder_work.l = 0;
         t1_c1_packet_decoder_work.packet[t1_c1_packet_decoder_work.l++] = t1_c1_packet_decoder_work.L;
-        t1_c1_packet_decoder_work.L = FULL_TLG_LENGTH_FROM_L_FIELD[t1_c1_packet_decoder_work.L];
+        // T1 does not count CRCs, so we need to compute the number of blocks here
+        t1_c1_packet_decoder_work.L += ((t1_c1_packet_decoder_work.L - 10 + 15)/16 + 1) * 2;
+        t1_c1_packet_decoder_work.L++; // account for length byte itself
     }
 }
 
@@ -414,8 +385,8 @@ static void c1_rx_last_lfield_bit(unsigned bit)
     t1_c1_packet_decoder_work.l = 0;
     t1_c1_packet_decoder_work.packet[t1_c1_packet_decoder_work.l++] = t1_c1_packet_decoder_work.L;
     if (!t1_c1_packet_decoder_work.c1b) {
-        unsigned L = t1_c1_packet_decoder_work.L;
-        t1_c1_packet_decoder_work.L += ((L - 10 + 15)/16 + 1) * 2; // C1A does not count CRCs, so we need to compute the number of blocks here
+	// C1A does not count CRCs, so we need to compute the number of blocks here
+        t1_c1_packet_decoder_work.L += ((t1_c1_packet_decoder_work.L - 10 + 15)/16 + 1) * 2;
     }
     t1_c1_packet_decoder_work.L++; // account for length byte itself
 }
