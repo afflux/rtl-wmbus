@@ -29,6 +29,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
@@ -247,12 +248,16 @@ static struct
     char timestamp[64];
 } t1_c1_packet_decoder_work = {.state = &states[0]}; // idle
 
+static void reset(void) {
+    memset(&t1_c1_packet_decoder_work, 0, sizeof(t1_c1_packet_decoder_work));
+    t1_c1_packet_decoder_work.state = &states[0];
+}
 
 static void idle(unsigned bit)
 {
     if (!(bit & PACKET_PREAMBLE_DETECTED_MASK))
     {
-        t1_c1_packet_decoder_work.state = &states[0]; // idle
+        reset();
     }
 }
 
@@ -305,7 +310,7 @@ static void rx_low_nibble_last_lfield_bit(unsigned bit)
         }
         else
         {
-            t1_c1_packet_decoder_work.state = &states[0]; // idle
+            reset();
         }
     }
     else
@@ -389,7 +394,7 @@ static void c1_rx_last_mode_bit(unsigned bit)
     }
     else
     {
-        t1_c1_packet_decoder_work.state = &states[0]; // idle
+        reset();
     }
 }
 
@@ -569,7 +574,7 @@ static void t1_c1_packet_decoder(unsigned bit, unsigned rssi)
         fprintf(stdout, "\n");
         fflush(stdout);
 
-        t1_c1_packet_decoder_work.state = &states[0]; // idle
+        reset();
     }
     else
     {
@@ -577,10 +582,9 @@ static void t1_c1_packet_decoder(unsigned bit, unsigned rssi)
         // The current packet seems to be collided with an another one.
         if (rssi < PACKET_CAPTURE_THRESHOLD)
         {
-            t1_c1_packet_decoder_work.state = &states[0]; // idle
+            reset();
         }
     }
 }
 
 #endif /* T1_C1_PACKET_DECODER_H */
-
